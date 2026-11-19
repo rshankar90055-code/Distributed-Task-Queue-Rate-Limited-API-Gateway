@@ -4,6 +4,9 @@ from fastapi import Depends, FastAPI
 
 from pathlib import Path
 
+from fastapi import Depends, FastAPI, Request
+from app.rate_limiter import peek_bucket, rate_limit
+
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -52,6 +55,9 @@ def health():
 
 
 @app.get("/metrics")
+@app.get("/rate-limit/status")
+def rate_limit_status(request: Request):
+    return peek_bucket(request)
 def metrics():
     counters = redis_client.hgetall("metrics:counters")
     return {

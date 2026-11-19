@@ -81,3 +81,21 @@ def rate_limit(request: Request, response: Response) -> None:
                 "X-RateLimit-Remaining": "0",
             },
         )
+def peek_bucket(request: Request) -> dict:
+    """Return the bucket state without consuming a token (requests 0 tokens)."""
+    client_id = get_client_id(request)
+    _, tokens, _ = _token_bucket(
+        keys=[f"ratelimit:{client_id}"],
+        args=[
+            settings.rate_limit_capacity,
+            settings.rate_limit_refill_rate,
+            time.time(),
+            0,
+        ],
+    )
+    return {
+        "client": client_id,
+        "capacity": settings.rate_limit_capacity,
+        "refill_rate": settings.rate_limit_refill_rate,
+        "tokens": float(tokens),
+    }

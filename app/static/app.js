@@ -26,6 +26,40 @@ function fmtSeconds(v) {
     return v < 10 ? v.toFixed(2) + "s" : v.toFixed(1) + "s";
 }
 
+// Each browser gets its own rate-limit identity
+const CLIENT_ID = (() => {
+    try {
+        let id = localStorage.getItem("tq-client");
+        if (!id) {
+            id = "dash-" + Math.random().toString(36).slice(2, 8);
+            localStorage.setItem("tq-client", id);
+        }
+        return id;
+    } catch {
+        return "dash-" + Math.random().toString(36).slice(2, 8);
+    }
+})();
+
+// fetch wrapper that always sends our client identity
+function apiFetch(url, options = {}) {
+    const headers = { "X-API-Key": CLIENT_ID, ...(options.headers || {}) };
+    return fetch(url, { cache: "no-store", ...options, headers });
+}
+
+function toast(message, type = "info", ms = 3200) {
+    const el = document.createElement("div");
+    el.className = "toast " + type;
+    el.textContent = message;
+    $("toasts").appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    setTimeout(() => {
+        el.classList.remove("show");
+        setTimeout(() => el.remove(), 300);
+    }, ms);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 /* ---------- metrics (U2) ---------- */
 
 const POLL_MS = 2000;
@@ -150,9 +184,95 @@ function initMetrics() {
     setInterval(pollMetrics, POLL_MS);
 }
 
+/* ---------- rate limiter (U3) ---------- */
+
+const bucketState = { tokens: 0, capacity: 10, rate: 1, at: performance.now(), ready: false };
+let bucketCells = [];
+
+function buildBucket(capacity) {
+    $("bucket").innerHTML = Array.from({ length: capacity }, () => "<div class='cell'><i></i></div>").join("");
+    bucketCells = [...$("bucket").querySelectorAll(".cell i")];
+}
+
+function currentTokens() {
+    const elapsed = (performance.now() - bucketState.at) / 1000;
+    return Math.min(bucketState.capacity, bucketState.tokens + elapsed * bucketState.rate);
+}
+
+function renderBucket() {
+    if (!bucketState.ready) return;
+    const t = currentTokens();
+    bucketCells.forEach((cell, i) => {
+        cell.style.setProperty("--fill", Math.max(0, Math.min(1, t - i)));
+    });
+    $("tokenText").textContent = `${Math.floor(t)} / ${bucketState.capacity} tokens`;
+}
+
+async function syncBucket() {
+    try {
+        const res = await apiFetch("/rate-limit/status");
+        const s = await res.json();
+        if (!bucketState.ready || bucketState.capacity !== s.capacity) buildBucket(s.capacity);
+        Object.assign(bucketState, {
+            tokens: s.tokens,
+            capacity: s.capacity,
+            rate: s.refill_rate,
+            at: performance.now(),
+            ready: true,
+        });
+        $("clientId").textContent = s.client;
+    } catch { /* the connection pill already shows API problems */ }
+}
+
+async function fireBurst() {
+    const btn = $("burstBtn");
+    const grid = $("burstGrid");
+    btn.disabled = true;
+    grid.innerHTML = "";
+    $("burstSummary").textContent = "";
+    let ok = 0, blocked = 0;
+
+    for (let i = 1; i <= 15; i++) {
+        let code = 0;
+        try {
+            const res = await apiFetch("/jobs/burst-test");
+            code = res.status;
+        } catch { code = 0; }
+
+        const cell = document.createElement("div");
+        const allowed = code === 200;
+        cell.className = "burst-cell " + (allowed ? "ok" : "no");
+        cell.textContent = allowed ? "✓" : code || "!";
+        cell.title = `Request ${i}: HTTP ${code}`;
+        grid.appendChild(cell);
+        allowed ? ok++ : blocked++;
+
+        // each request spent a token, so reflect that immediately
+        if (allowed) {
+            bucketState.tokens = Math.max(0, currentTokens() - 1);
+            bucketState.at = performance.now();
+        }
+        await sleep(70);
+    }
+
+    $("burstSummary").textContent = `${ok} allowed · ${blocked} blocked (429)`;
+    if (blocked) toast(`Rate limit hit: ${blocked} requests blocked`, "error");
+    await syncBucket();
+    btn.disabled = false;
+}
+
+function initRateLimiter() {
+    $("clientId").textContent = CLIENT_ID;
+    syncBucket();
+    setInterval(syncBucket, 4000);   // re-sync with the server
+    setInterval(renderBucket, 100);  // smooth local animation
+    $("burstBtn").addEventListener("click", fireBurst);
+}
+
 /* ---------- boot ---------- */
 
 document.addEventListener("DOMContentLoaded", () => {
     initMetrics();
-    // U3 and U4 init calls get added here
+    initRateLimiter();
+    // U4 init call gets added here
 });
