@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TaskQueue Gateway · Control Center</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
+</head>
+
+<body>
+    <div class="bg-glow"></div>
+
+    <main class="app">
+        <!-- Top bar -->
+        <header class="topbar">
+            <div class="brand">
+                <div class="logo">⚡</div>
+                <div>
+                    <h1>TaskQueue Gateway</h1>
+                    <p>Distributed task queue &amp; rate-limited API</p>
+                </div>
+            </div>
+            <div class="topbar-right">
+                <a class="link" href="/docs" target="_blank" rel="noopener">API Docs ↗</a>
+                <div class="pill" id="conn"><span class="dot"></span><span id="connText">Connecting…</span></div>
+            </div>
+        </header>
+
+        <!-- KPI cards -->
+        <section class="kpis">
+            <article class="card kpi" data-accent="violet">
+                <span class="kpi-label">Queue depth</span>
+                <strong id="kpiQueue">–</strong>
+                <small>jobs waiting</small>
+            </article>
+            <article class="card kpi" data-accent="green">
+                <span class="kpi-label">Completed</span>
+                <strong id="kpiCompleted">–</strong>
+                <small>tasks succeeded</small>
+            </article>
+            <article class="card kpi" data-accent="amber">
+                <span class="kpi-label">Retried</span>
+                <strong id="kpiRetried">–</strong>
+                <small>automatic retries</small>
+            </article>
+            <article class="card kpi" data-accent="red">
+                <span class="kpi-label">Failed</span>
+                <strong id="kpiFailed">–</strong>
+                <small>gave up after retries</small>
+            </article>
+        </section>
+
+        <!-- Chart + latency -->
+        <section class="grid two">
+            <article class="card">
+                <div class="card-head">
+                    <h2>Queue depth</h2>
+                    <span class="muted">live · last 2 minutes</span>
+                </div>
+                <div class="chart-wrap"><canvas id="queueChart"></canvas></div>
+            </article>
+
+            <article class="card">
+                <div class="card-head">
+                    <h2>Latency</h2>
+                    <span class="muted">seconds</span>
+                </div>
+                <div class="lat-group">
+                    <h3>Queue wait</h3>
+                    <div id="latWait"></div>
+                </div>
+                <div class="lat-group">
+                    <h3>Run time</h3>
+                    <div id="latRun"></div>
+                </div>
+            </article>
+        </section>
+
+        <!-- Submit job + tracker -->
+        <section class="grid two-eq">
+            <article class="card">
+                <div class="card-head">
+                    <h2>Submit a job</h2>
+                </div>
+                <form id="jobForm" class="form" autocomplete="off">
+                    <label>
+                        <span class="row">Job name</span>
+                        <input type="text" id="jobName" value="monthly-report" maxlength="100" required />
+                    </label>
+                    <label>
+                        <span class="row">Duration <output id="durOut">5s</output></span>
+                        <input type="range" id="jobDur" min="1" max="60" value="5" />
+                    </label>
+                    <label>
+                        <span class="row">Failure rate <output id="failOut">0%</output></span>
+                        <input type="range" id="jobFail" min="0" max="100" step="5" value="0" />
+                    </label>
+                    <div class="chips">
+                        <button type="button" class="chip" data-preset="quick">⚡ Quick</button>
+                        <button type="button" class="chip" data-preset="heavy">🏋️ Heavy</button>
+                        <button type="button" class="chip" data-preset="flaky">🎲 Flaky</button>
+                        <button type="button" class="chip" data-preset="doomed">💥 Doomed</button>
+                    </div>
+                    <div class="btn-row">
+                        <button type="submit" class="btn primary">Queue job</button>
+                        <button type="button" class="btn" id="loadBtn">Queue 5 jobs</button>
+                    </div>
+                </form>
+            </article>
+
+            <article class="card">
+                <div class="card-head">
+                    <h2>Job tracker</h2>
+                    <button class="btn small" id="clearBtn" type="button">Clear finished</button>
+                </div>
+                <div class="empty" id="jobsEmpty">No jobs yet. Queue one and watch it move through the pipeline.</div>
+                <ul class="jobs" id="jobList"></ul>
+            </article>
+        </section>
+
+        <!-- Rate limiter -->
+        <section class="card">
+            <div class="card-head">
+                <h2>Token-bucket rate limiter</h2>
+                <span class="muted">client <code id="clientId">–</code></span>
+            </div>
+            <div class="rl">
+                <div>
+                    <div class="bucket" id="bucket"></div>
+                    <div class="bucket-meta">
+                        <span id="tokenText">– tokens</span>
+                        <span class="muted">refills 1 token / second</span>
+                    </div>
+                </div>
+                <div>
+                    <p class="muted">Each request costs one token. Fire a burst to drain the bucket and watch the API
+                        start answering <b>429</b>.</p>
+                    <div class="burst" id="burstGrid"></div>
+                    <div class="btn-row">
+                        <button class="btn" id="burstBtn" type="button">Fire 15 requests</button>
+                        <span class="muted" id="burstSummary"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <footer class="footer">FastAPI · Celery · Redis · Docker</footer>
+    </main>
+
+    <div class="toasts" id="toasts"></div>
+</body>
+
+</html>

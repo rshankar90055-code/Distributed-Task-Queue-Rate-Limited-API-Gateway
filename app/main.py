@@ -2,6 +2,11 @@ import redis
 from celery.result import AsyncResult
 from fastapi import Depends, FastAPI
 
+from pathlib import Path
+
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 from app.celery_app import celery_app
 from app.config import settings
 from app.rate_limiter import rate_limit
@@ -9,6 +14,14 @@ from app.schemas import JobRequest, JobStatusResponse, JobSubmitResponse
 from app.tasks import process_job
 
 app = FastAPI(title="Task Queue & Rate-Limited Gateway")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    return FileResponse(STATIC_DIR / "index.html")
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
 broker_client = redis.Redis.from_url(settings.celery_broker_url, decode_responses=True)
