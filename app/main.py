@@ -26,7 +26,7 @@ def health():
     dependencies=[Depends(rate_limit)],
 )
 def submit_job(job: JobRequest):
-    task = process_job.delay(job.job_name, job.duration)
+    task = process_job.delay(job.job_name, job.duration, job.fail_rate)
     return JobSubmitResponse(job_id=task.id, status="queued")
 
 
