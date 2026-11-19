@@ -31,7 +31,10 @@ def _safe(fn):
 @before_task_publish.connect
 @_safe
 def on_publish(headers=None, **kwargs):
+    headers= headers or {}
     task_id = headers.get("id")
+    if not task_id:
+        return
     r.set(f"metrics:published:{task_id}", time.time(), ex=3600)
 
 
