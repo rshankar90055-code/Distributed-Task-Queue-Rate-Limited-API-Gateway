@@ -18,3 +18,4 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_acks_late=True,
 )
+import app.metrics  # noqa: E402,F401  (registers the signal handlers)

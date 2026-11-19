@@ -11,12 +11,46 @@ from app.tasks import process_job
 app = FastAPI(title="Task Queue & Rate-Limited Gateway")
 
 redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+broker_client = redis.Redis.from_url(settings.celery_broker_url, decode_responses=True)
+
+
+def _stats(values):
+    """Summarize a list of seconds."""
+    if not values:
+        return {"count": 0, "avg": None, "p50": None, "p95": None, "max": None}
+    v = sorted(float(x) for x in values)
+
+    def pct(p):
+        return v[min(len(v) - 1, int(len(v) * p))]
+
+    return {
+        "count": len(v),
+        "avg": round(sum(v) / len(v), 3),
+        "p50": round(pct(0.50), 3),
+        "p95": round(pct(0.95), 3),
+        "max": round(v[-1], 3),
+    }
 
 
 @app.get("/health")
 def health():
     redis_ok = redis_client.ping()
     return {"status": "ok", "redis": redis_ok}
+
+
+@app.get("/metrics")
+def metrics():
+    counters = redis_client.hgetall("metrics:counters")
+    return {
+        "queue_depth": broker_client.llen("celery"),
+        "tasks": {
+            "completed": int(counters.get("completed", 0)),
+            "failed": int(counters.get("failed", 0)),
+            "retried": int(counters.get("retried", 0)),
+        },
+        "queue_wait_seconds": _stats(redis_client.lrange("metrics:wait_times", 0, -1)),
+        "run_time_seconds": _stats(redis_client.lrange("metrics:run_times", 0, -1)),
+    }
 
 
 @app.post(
