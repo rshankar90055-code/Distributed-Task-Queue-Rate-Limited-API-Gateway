@@ -105,7 +105,6 @@ pytest -v
 ```
 app/
   static/          Dashboard (index.html, styles.css, app.js)
-docs/              Screenshots
   main.py          API routes
   celery_app.py    Celery configuration
   tasks.py         Background tasks with retry policy
@@ -118,6 +117,7 @@ scripts/           Manual rate-limit demo
 Dockerfile
 docker-compose.yml
 ```
+docs/              Screenshots
 
 ## Possible improvements
 
