@@ -55,9 +55,6 @@ def health():
 
 
 @app.get("/metrics")
-@app.get("/rate-limit/status")
-def rate_limit_status(request: Request):
-    return peek_bucket(request)
 def metrics():
     counters = redis_client.hgetall("metrics:counters")
     return {
@@ -70,6 +67,10 @@ def metrics():
         "queue_wait_seconds": _stats(redis_client.lrange("metrics:wait_times", 0, -1)),
         "run_time_seconds": _stats(redis_client.lrange("metrics:run_times", 0, -1)),
     }
+
+@app.get("/rate-limit/status")
+def rate_limit_status(request: Request):
+    return peek_bucket(request)
 
 @app.get("/dashboard/jobs", include_in_schema=False)
 def dashboard_jobs(ids: str):

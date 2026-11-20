@@ -68,3 +68,27 @@ def test_metrics_shape():
     assert "queue_depth" in data
     assert set(data["tasks"]) == {"completed", "failed", "retried"}
     assert "p95" in data["queue_wait_seconds"]
+
+def test_dashboard_page_is_served():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "TaskQueue Gateway" in r.text
+
+
+def test_static_assets_are_served():
+    assert client.get("/static/app.js").status_code == 200
+    assert client.get("/static/styles.css").status_code == 200
+
+
+def test_rate_limit_status_does_not_consume_tokens(fresh_key):
+    first = client.get("/rate-limit/status", headers=fresh_key).json()
+    second = client.get("/rate-limit/status", headers=fresh_key).json()
+    assert first["capacity"] == 10
+    assert second["tokens"] > 9.5  # peeking must not spend tokens
+
+
+def test_dashboard_batch_job_lookup():
+    r = client.get("/dashboard/jobs?ids=abc,def")
+    assert r.status_code == 200
+    assert set(r.json()) == {"abc", "def"}
+    assert r.json()["abc"]["status"] == "PENDING"

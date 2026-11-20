@@ -3,6 +3,10 @@
 A FastAPI gateway that moves heavy work to background Celery workers and
 limits how fast each client can send requests.
 
+![Dashboard](docs/dashboard.png)
+
+**Live demo UI:** open http://127.0.0.1:8000/ after starting the stack.
+
 ## Problem
 
 Heavy jobs block API requests, and one noisy client can overload downstream
@@ -48,6 +52,7 @@ docker compose up --build
 | GET | `/jobs/{job_id}` | Get job status and result. |
 | GET | `/metrics` | Queue depth, task counters, wait and run-time stats. |
 | GET | `/health` | Service and Redis health. |
+| GET | `/` | Live dashboard (metrics chart, job tracker, token-bucket visual). |
 
 Example:
 
@@ -77,6 +82,15 @@ Failed jobs retry automatically with exponential backoff (2s, 4s, 8s, ...,
 capped at 60s) plus jitter, up to 5 retries. Tasks acknowledge late, so a
 crashed worker does not lose its job.
 
+## Dashboard
+
+A dependency-free UI (HTML, CSS, JavaScript and Chart.js) served by FastAPI:
+
+- Live queue depth, completed, retried and failed counters
+- Rolling queue-depth chart and latency bars (avg, p50, p95, max)
+- Job submission with presets (quick, heavy, flaky, doomed) and a live tracker
+- Token-bucket visual with a burst test that shows 429 responses
+
 ## Running tests
 
 Requires Redis on localhost:6379 (`docker compose up -d redis`).
@@ -90,6 +104,8 @@ pytest -v
 
 ```
 app/
+  static/          Dashboard (index.html, styles.css, app.js)
+docs/              Screenshots
   main.py          API routes
   celery_app.py    Celery configuration
   tasks.py         Background tasks with retry policy
