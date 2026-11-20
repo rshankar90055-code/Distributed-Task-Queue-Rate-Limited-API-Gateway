@@ -71,6 +71,18 @@ def metrics():
         "run_time_seconds": _stats(redis_client.lrange("metrics:run_times", 0, -1)),
     }
 
+@app.get("/dashboard/jobs", include_in_schema=False)
+def dashboard_jobs(ids: str):
+    """Batch status lookup for the dashboard (comma-separated job IDs)."""
+    out = {}
+    for job_id in ids.split(",")[:50]:
+        task = AsyncResult(job_id, app=celery_app)
+        out[job_id] = {
+            "status": task.status,
+            "result": task.result if task.status == "SUCCESS" else None,
+        }
+    return out
+
 
 @app.post(
     "/jobs",

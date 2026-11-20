@@ -269,10 +269,209 @@ function initRateLimiter() {
     $("burstBtn").addEventListener("click", fireBurst);
 }
 
+/* ---------- jobs (U4) ---------- */
+
+const PRESETS = {
+    quick: { name: "quick-task", dur: 2, fail: 0 },
+    heavy: { name: "heavy-report", dur: 20, fail: 0 },
+    flaky: { name: "flaky-sync", dur: 3, fail: 60 },
+    doomed: { name: "doomed-job", dur: 2, fail: 100 },
+};
+
+const STATUS_MAP = {
+    PENDING: "queued",
+    STARTED: "running",
+    RETRY: "retrying",
+    SUCCESS: "success",
+    FAILURE: "failed",
+};
+const STATUS_LABEL = {
+    queued: "Queued", running: "Running", retrying: "Retrying", success: "Done", failed: "Failed",
+};
+
+const jobs = []; // newest first
+
+function syncSliderLabels() {
+    $("durOut").textContent = $("jobDur").value + "s";
+    $("failOut").textContent = $("jobFail").value + "%";
+}
+
+function applyPreset(key) {
+    const p = PRESETS[key];
+    $("jobName").value = p.name;
+    $("jobDur").value = p.dur;
+    $("jobFail").value = p.fail;
+    syncSliderLabels();
+}
+
+function createJobElement(job) {
+    const li = document.createElement("li");
+    li.className = "job queued";
+    li.innerHTML = `
+    <div class="job-name">
+      <b></b><code>${job.id.slice(0, 8)}</code>
+    </div>
+    <div class="job-side">
+      <span class="time">0s</span>
+      <span class="badge">Queued</span>
+    </div>
+    <div class="bar"><i></i></div>`;
+    li.querySelector("b").textContent = job.name;
+    return li;
+}
+
+function addJob(id, name, duration) {
+    const job = {
+        id, name, duration,
+        ui: "queued",
+        submittedAt: performance.now(),
+        startedAt: null,
+        finishedAt: null,
+        attempts: null,
+    };
+    job.el = createJobElement(job);
+    jobs.unshift(job);
+    $("jobList").prepend(job.el);
+    $("jobsEmpty").hidden = true;
+}
+
+function renderJob(job) {
+    const el = job.el;
+    const now = performance.now();
+
+    el.className = "job " + job.ui;
+    const badge = el.querySelector(".badge");
+    badge.textContent = STATUS_LABEL[job.ui] +
+        (job.ui === "success" && job.attempts > 1 ? ` · ${job.attempts} tries` : "");
+
+    const end = job.finishedAt ?? now;
+    el.querySelector(".time").textContent = ((end - job.submittedAt) / 1000).toFixed(0) + "s";
+
+    let pct = 0;
+    if (job.ui === "queued") pct = 4;
+    else if (job.ui === "running") {
+        const elapsed = (now - (job.startedAt ?? now)) / 1000;
+        pct = Math.min(95, (elapsed / job.duration) * 100);
+    } else pct = 100; // retrying, success, failed
+    el.querySelector(".bar i").style.width = pct + "%";
+}
+
+function updateJobStatus(job, data) {
+    const next = STATUS_MAP[data.status] ?? "queued";
+    if (next === job.ui) return;
+
+    job.ui = next;
+    if (next === "running") job.startedAt = performance.now();
+
+    if (next === "success" || next === "failed") {
+        job.finishedAt = performance.now();
+        if (next === "success") {
+            job.attempts = data.result?.attempts ?? 1;
+            toast(`${job.name} completed`, "success");
+        } else {
+            toast(`${job.name} failed after retries`, "error");
+        }
+    }
+}
+
+async function pollJobs() {
+    const active = jobs.filter((j) => j.ui !== "success" && j.ui !== "failed");
+    if (!active.length || document.hidden) return;
+    try {
+        const ids = active.map((j) => j.id).join(",");
+        const res = await fetch("/dashboard/jobs?ids=" + encodeURIComponent(ids), { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        active.forEach((j) => data[j.id] && updateJobStatus(j, data[j.id]));
+    } catch { /* connection pill covers this */ }
+}
+
+async function submitJob(name, duration, failPct) {
+    const res = await apiFetch("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_name: name, duration, fail_rate: failPct / 100 }),
+    });
+
+    if (res.status === 429) {
+        const wait = res.headers.get("Retry-After") || "a few";
+        toast(`Rate limited. Try again in ${wait}s`, "error");
+        return false;
+    }
+    if (!res.ok) {
+        toast("Could not queue job (HTTP " + res.status + ")", "error");
+        return false;
+    }
+    const data = await res.json();
+    addJob(data.job_id, name, duration);
+    return true;
+}
+
+async function onSubmit(e) {
+    e.preventDefault();
+    const btn = e.submitter;
+    btn.disabled = true;
+    try {
+        const ok = await submitJob(
+            $("jobName").value.trim() || "untitled",
+            Number($("jobDur").value),
+            Number($("jobFail").value),
+        );
+        if (ok) { toast("Job queued", "info"); syncBucket(); }
+    } catch {
+        toast("API unreachable", "error");
+    }
+    btn.disabled = false;
+}
+
+async function queueFive() {
+    const btn = $("loadBtn");
+    btn.disabled = true;
+    const name = $("jobName").value.trim() || "batch";
+    const dur = Number($("jobDur").value);
+    const fail = Number($("jobFail").value);
+    try {
+        for (let i = 1; i <= 5; i++) {
+            const ok = await submitJob(`${name} #${i}`, dur, fail);
+            if (!ok) break;
+            await sleep(80);
+        }
+    } catch {
+        toast("API unreachable", "error");
+    }
+    syncBucket();
+    btn.disabled = false;
+}
+
+function clearFinished() {
+    for (let i = jobs.length - 1; i >= 0; i--) {
+        if (jobs[i].ui === "success" || jobs[i].ui === "failed") {
+            jobs[i].el.remove();
+            jobs.splice(i, 1);
+        }
+    }
+    $("jobsEmpty").hidden = jobs.length > 0;
+}
+
+function initJobs() {
+    syncSliderLabels();
+    $("jobDur").addEventListener("input", syncSliderLabels);
+    $("jobFail").addEventListener("input", syncSliderLabels);
+    document.querySelectorAll(".chip").forEach((c) =>
+        c.addEventListener("click", () => applyPreset(c.dataset.preset)));
+    $("jobForm").addEventListener("submit", onSubmit);
+    $("loadBtn").addEventListener("click", queueFive);
+    $("clearBtn").addEventListener("click", clearFinished);
+
+    setInterval(pollJobs, 1000);                       // ask the server
+    setInterval(() => jobs.forEach(renderJob), 250);   // smooth local progress
+}
+
 /* ---------- boot ---------- */
 
 document.addEventListener("DOMContentLoaded", () => {
     initMetrics();
     initRateLimiter();
+    initJobs();
     // U4 init call gets added here
 });
